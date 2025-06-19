@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Allocation Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- React CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- PapaParse CDN for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <!-- PropTypes CDN (Recharts dependency) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.7.2/prop-types.min.js"></script>
+    <!-- Recharts CDN (Updated to UMD version for better global exposure) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.1.9/Recharts.min.js"></script>
+    <!-- Babel for JSX transformation in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom styles for scrollbars */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 antialiased">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // Ensure React and ReactDOM are available globally
+        const React = window.React;
+        const ReactDOM = window.ReactDOM;
+        const Papa = window.Papa;
+        // Access Recharts components from the global Recharts object
+        const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid, Brush } = window.Recharts;
+
+        // --- Mock UI Components for Shadcn/ui replacements ---
+        // These components provide basic functionality and styling
+        // to allow the main application to run without the full Shadcn/ui library.
+
+        const Card = ({ children, className = "" }) => (
+            <div className={`bg-white p-4 rounded-lg shadow-sm border border-gray-200 ${className}`}>
+                {children}
+            </div>
+        );
+        const CardHeader = ({ children, className = "" }) => (
+            <div className={`mb-2 ${className}`}>
+                {children}
+            </div>
+        );
+        const CardTitle = ({ children, className = "", title = "" }) => (
+            <h3 className={`text-lg font-semibold ${className}`} title={title}>
+                {children}
+            </h3>
+        );
+        const CardContent = ({ children, className = "" }) => (
+            <div className={`${className}`}>
+                {children}
+            </div>
+        );
+
+        const Button = ({ children, onClick, size = "md", variant = "default", className = "", disabled = false, ...props }) => {
+            const baseStyle = "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none";
+            const sizeStyle = {
+                sm: "h-8 px-3",
+                md: "h-10 px-4 py-2",
+                lg: "h-12 px-6",
+                icon: "h-8 w-8", // For icon buttons, matches size="icon"
+            }[size];
+            const variantStyle = {
+                default: "bg-blue-600 text-white hover:bg-blue-700",
+                secondary: "bg-gray-200 text-gray-800 hover:bg-gray-300",
+                ghost: "hover:bg-gray-100 text-gray-800",
+                // Add more variants if needed
+            }[variant];
+            return (
+                <button
+                    onClick={onClick}
+                    className={`${baseStyle} ${sizeStyle} ${variantStyle} ${className}`}
+                    disabled={disabled}
+                    {...props}
+                >
+                    {children}
+                </button>
+            );
+        };
+
+        const Input = ({ type = "text", className = "", onChange, ...props }) => (
+            <input
+                type={type}
+                className={`flex h-9 w-full rounded-md border border-gray-300 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+                onChange={onChange}
+                {...props}
+            />
+        );
+
+        // Simple Select mock
+        const Select = ({ value, onValueChange, children }) => {
+            const handleChange = (e) => {
+                if (onValueChange) onValueChange(e.target.value);
+            };
+            return (
+                <select value={value} onChange={handleChange} className="h-8 px-3 rounded-md border border-gray-300 bg-white text-sm focus:ring-blue-500 focus:border-blue-500">
+                    {children}
+                </select>
+            );
+        };
+        const SelectTrigger = ({ children, className = "" }) => (
+            // This component isn't strictly needed for a basic <select>,
+            // but for visual consistency, we'll make it render its children.
+            // In a real UI library, this would control the dropdown state.
+            <div className={`flex items-center justify-between gap-2 cursor-pointer ${className}`}>
+                {children}
+                {/* <span className="text-gray-500">▼</span> Placeholder for dropdown icon */}
+            </div>
+        );
+        const SelectContent = ({ children }) => (
+            // In a real UI library, this would be a popover.
+            // For this mock, it's just a container for SelectItem.
+            <React.Fragment>{children}</React.Fragment>
+        );
+        const SelectItem = ({ value, children }) => (
+            <option value={value}>{children}</option>
+        );
+
+        // Simple Dialog (Modal) mock
+        const Dialog = ({ open, onOpenChange, children }) => {
+            if (!open) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => onOpenChange(false)}>
+                    <div className="bg-white p-6 rounded-lg shadow-xl max-w-full md:max-w-md mx-auto relative" onClick={e => e.stopPropagation()}>
+                        <button className="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-xl" onClick={() => onOpenChange(false)}>&times;</button>
+                        {children}
+                    </div>
+                </div>
+            );
+        };
+        const DialogContent = ({ children, className = "" }) => (
+            <div className={`p-4 ${className}`}>
+                {children}
+            </div>
+        );
+        const DialogHeader = ({ children }) => (
+            <div className="mb-4">
+                {children}
+            </div>
+        );
+        const DialogTitle = ({ children }) => (
+            <h2 className="text-xl font-bold mb-2">{children}</h2>
+        );
+
+        // --- Lucide React Icons (mock with simple text or SVG for FileUp, AlertCircle, Download) ---
+        const FileUp = ({ className = "" }) => (
+             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={`lucide lucide-file-up ${className}`}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 16v-6"/><path d="m15 13-3-3-3 3"/></svg>
+        );
+        const AlertCircle = ({ className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={`lucide lucide-alert-circle ${className}`}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+        );
+        const Download = ({ className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={`lucide lucide-download ${className}`}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+        );
+
+
+        // --- AllocationDashboard Component ---
+        // The core logic of the application, adapted from your provided code.
+        const groupSum = (rows, keyFn, valFn = r => +r.units) => {
+            const m = new Map();
+            rows.forEach(r => m.set(keyFn(r), (m.get(keyFn(r)) || 0) + valFn(r)));
+            return [...m].map(([key, total]) => ({ key, total }));
+        };
+        const groupCount = (rows, keyFn) => {
+            const m = new Map();
+            rows.forEach(r => m.set(keyFn(r), (m.get(keyFn(r)) || 0) + 1));
+            return [...m].map(([key, total]) => ({ key, total }));
+        };
+        const median = arr => {
+            const sorted = [...arr].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        };
+        const downloadCSV = (rows, name) => {
+            if (!rows?.length) return;
+            // Handle case where rows might not be simple objects (e.g., zeroProd is an array of strings)
+            let header = "";
+            let body = "";
+
+            if (typeof rows[0] === 'object' && rows[0] !== null) {
+                header = Object.keys(rows[0]).join(",");
+                body = rows.map(r => Object.values(r).join(",")).join("\n");
+            } else { // Assume it's an array of primitives like strings (for zeroProd)
+                header = "Value"; // Default header for single column data
+                body = rows.join("\n");
+            }
+
+            const blob = new Blob([header + "\n" + body], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = name;
+            a.click();
+            URL.revokeObjectURL(url);
+        };
+
+        function AllocationDashboard() {
+            const [rows, setRows] = React.useState([]);
+            const [error, setError] = React.useState("");
+            const [sortLoc, setSortLoc] = React.useState("desc");
+            const [sortProd, setSortProd] = React.useState("desc");
+            const [topLoc, setTopLoc] = React.useState("10");
+            const [topProd, setTopProd] = React.useState("10");
+            const [topDist, setTopDist] = React.useState("All");
+            const [distView, setDistView] = React.useState("sku");
+            const [modal, setModal] = React.useState(null);
+            const [insightModalOpen, setInsightModalOpen] = React.useState(false); // State for insight modal
+            const [insights, setInsights] = React.useState(""); // State for LLM insights
+            const [generatingInsights, setGeneratingInsights] = React.useState(false); // Loading state for LLM
+
+            const locRef = React.useRef(null);
+            const prodRef = React.useRef(null);
+            const distRef = React.useRef(null);
+
+            const handleFile = file => {
+                setError("");
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: res => {
+                        if (res.errors.length) return setError("CSV parse error or empty file. Please check your CSV.");
+                        setRows(res.data);
+                    },
+                    error: err => {
+                        setError(`PapaParse error: ${err.message}`);
+                    }
+                });
+            };
+
+            const handleTopLocChange = v => {
+                setTopLoc(v);
+                locRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+            const handleTopProdChange = v => {
+                setTopProd(v);
+                prodRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+            const handleTopDistChange = v => {
+                setTopDist(v);
+                distRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+            const handleDistViewChange = v => {
+                setDistView(v);
+                distRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+
+            const calc = React.useMemo(() => {
+                if (!rows.length) return null;
+                // Filter out rows where units might be empty or invalid before processing
+                const validRows = rows.filter(r => !isNaN(Number(r.units)) && r.units !== "");
+
+                const loc = groupSum(validRows, r => r.location_id);
+                const prod = groupSum(validRows, r => r.product_id);
+                const prodLoc = groupSum(validRows, r => `${r.product_id}__${r.location_id}`);
+                const sortArr = (arr, dir) => [...arr].sort((a, b) => dir === "asc" ? a.total - b.total : b.total - a.total);
+
+                const rawDist = groupCount(validRows, r => +r.units)
+                    .sort((a, b) => +a.key - +b.key);
+
+                const totalUnits = validRows.reduce((s, r) => s + +r.units, 0);
+                const stores = loc.length;
+                const products = prod.length;
+                const unitsPerStore = loc.map(d => d.total);
+                const unitsPerProd = prod.map(d => d.total);
+                const avgStore = stores ? totalUnits / stores : 0;
+                const midStore = unitsPerStore.length ? median(unitsPerStore) : 0;
+                const avgProd = products ? totalUnits / products : 0;
+                const midProd = unitsPerProd.length ? median(unitsPerProd) : 0;
+                const prodLocCount = prodLoc.filter(d => d.total > 0).length;
+                const avgGap = validRows.length ? validRows.reduce((s, r) => s + (parseFloat(r.gap) || 0), 0) / validRows.length : 0;
+
+                const zeroProd = prod.filter(p => p.total === 0).map(p => p.key);
+                const gapData = groupSum(validRows, r => r.product_id, r => (parseFloat(r.gap) || 0))
+                    .map(g => {
+                        const u = prod.find(p => p.key === g.key)?.total || 0;
+                        const fill = u ? (u / (u + g.total) * 100).toFixed(1) : 0;
+                        return { product: g.key, units: u, gap: g.total, fill };
+                    }).sort((a, b) => b.gap - a.gap);
+
+                return {
+                    loc,
+                    prod,
+                    prodLoc,
+                    rawDist,
+                    sortArr,
+                    summaries: { totalUnits, stores, products, avgStore: avgStore.toFixed(2), midStore: midStore.toFixed(2), avgProd: avgProd.toFixed(2), midProd: midProd.toFixed(2), prodLocCount, avgGap: avgGap.toFixed(2) },
+                    zeroProd,
+                    gapData
+                };
+            }, [rows]);
+
+            // Function to get insights from LLM
+            const getInsights = async () => {
+                if (!calc) return;
+                setGeneratingInsights(true);
+                setInsightModalOpen(true);
+                setInsights("Generating insights... please wait.");
+
+                try {
+                    const { summaries, loc, prod, zeroProd, gapData, sortArr } = calc;
+
+                    // Prepare a concise prompt with relevant data
+                    const prompt = `Analyze the following allocation dashboard data. Provide a concise summary of insights, potential issues, and general recommendations for improving allocation.
+
+Key Performance Indicators:
+Total Units: ${summaries.totalUnits}
+Stores: ${summaries.stores}
+Products: ${summaries.products}
+Average Units per Store: ${summaries.avgStore}
+Median Units per Store: ${summaries.midStore}
+Average Units per Product: ${summaries.avgProd}
+Median Units per Product: ${summaries.midProd}
+Product-Location Pairs with Units > 0: ${summaries.prodLocCount}
+Average Gap: ${summaries.avgGap}
+
+Top 5 Locations (by units): ${JSON.stringify(sortArr(loc, "desc").slice(0, 5))}
+Bottom 5 Locations (by units): ${JSON.stringify(sortArr(loc, "asc").slice(0, 5))}
+Top 5 Products (by units): ${JSON.stringify(sortArr(prod, "desc").slice(0, 5))}
+Bottom 5 Products (by units): ${JSON.stringify(sortArr(prod, "asc").slice(0, 5))}
+Products with 0 Units: ${JSON.stringify(zeroProd)}
+Top 10 Products by Gap (highest gap first): ${JSON.stringify(gapData.slice(0, 10))}
+
+Based on this data, provide insights and actionable recommendations:`;
+
+                    let chatHistory = [];
+                    chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                    const payload = { contents: chatHistory };
+                    const apiKey = ""; // Canvas will automatically provide this in runtime.
+
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(`API Error: ${response.status} - ${errorData.error.message || 'Unknown error'}`);
+                    }
+
+                    const result = await response.json();
+
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        setInsights(result.candidates[0].content.parts[0].text);
+                    } else {
+                        setInsights("Could not generate insights. Unexpected API response structure.");
+                    }
+                } catch (e) {
+                    console.error("Error generating insights:", e);
+                    setInsights(`Failed to generate insights: ${e.message}. Please try again later.`);
+                } finally {
+                    setGeneratingInsights(false);
+                }
+            };
+
+            const opts = ["5", "10", "20", "50", "All"];
+            const SortSelect = ({ value, on }) => (
+                <Select value={value} onValueChange={on}>
+                    <SelectTrigger className="w-20 h-8 text-xs">{value}</SelectTrigger>
+                    <SelectContent>
+                        {opts.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                    </SelectContent>
+                </Select>
+            );
+            const KPI = ({ label, val }) => (
+                <Card className="shadow-sm p-4 rounded-lg">
+                    <CardHeader>
+                        <CardTitle className="text-sm text-gray-500">{label}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <p className="text-3xl font-bold">{typeof val === 'number' ? val.toLocaleString() : val}</p>
+                    </CardContent>
+                </Card>
+            );
+            const BarCard = ({ data, title, onClick, controls, xLabel, yLabel, barName = "Units" }) => ( // Added barName prop
+                <Card className="shadow-md rounded-lg">
+                    <CardHeader className="flex flex-row items-center gap-2 pb-2">
+                        <CardTitle className="text-sm flex-1 truncate" title={title}>{title}</CardTitle>
+                        {controls}
+                    </CardHeader>
+                    <CardContent className="h-72">
+                        {data && data.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={data} onClick={onClick}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis
+                                        dataKey="key"
+                                        angle={-45}
+                                        textAnchor="end"
+                                        height={60}
+                                        interval={0} /* Ensure all labels are shown */
+                                        label={xLabel ? { value: xLabel, position: 'insideBottom', offset: -5, dy: 10 } : undefined}
+                                        tick={{ fontSize: 10 }}
+                                    />
+                                    <YAxis label={yLabel ? { value: yLabel, angle: -90, position: 'insideLeft', dx: -5 } : undefined} tick={{ fontSize: 10 }} />
+                                    <Tooltip />
+                                    <Legend />
+                                    <Brush dataKey="key" height={20} stroke="#8884d8" />
+                                    <Bar dataKey="total" name={barName} fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="flex items-center justify-center h-full text-gray-500">
+                                No data available for this chart.
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            );
+
+            if (!rows.length) {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-br from-orange-50 to-blue-50 space-y-6">
+                        <h1 className="text-4xl font-extrabold text-gray-800 tracking-tight">Allocation Dashboard</h1>
+                        <label className="border-2 border-dashed border-gray-500 rounded-2xl p-12 hover:bg-orange-100 cursor-pointer flex flex-col items-center gap-6 transition-all duration-300 ease-in-out">
+                            <FileUp className="w-12 h-12 text-gray-600" />
+                            <span className="text-lg font-medium text-gray-700">Upload CSV File</span>
+                            <Input
+                                type="file"
+                                accept=".csv"
+                                className="hidden"
+                                onChange={e => e.target.files[0] && handleFile(e.target.files[0])}
+                            />
+                        </label>
+                        {error && (
+                            <div className="text-red-600 flex items-center gap-2 p-3 bg-red-100 rounded-md">
+                                <AlertCircle className="w-5 h-5" />
+                                <span className="font-medium">{error}</span>
+                            </div>
+                        )}
+                        <p className="text-sm text-gray-500 mt-4">
+                            Please upload a CSV file containing columns like `location_id`, `product_id`, `units`, and `gap`.
+                        </p>
+                    </div>
+                );
+            }
+
+            const { loc, prod, rawDist, sortArr, summaries, zeroProd, gapData } = calc;
+            const locSorted = sortArr(loc, sortLoc).slice(0, topLoc === 'All' ? loc.length : +topLoc);
+            const prodSorted = sortArr(prod, sortProd).slice(0, topProd === 'All' ? prod.length : +topProd);
+            const distSorted = rawDist.slice(0, topDist === 'All' ? rawDist.length : +topDist);
+
+            const openModal = (t, data) => setModal({ title: t, data });
+
+            return (
+                <div className="min-h-screen p-6 space-y-8 bg-gradient-to-br from-orange-50 to-blue-50">
+                    <header className="flex justify-between items-center bg-white p-4 rounded-lg shadow-md">
+                        <h1 className="text-2xl font-bold text-gray-800">Allocation Dashboard</h1>
+                        <div className="flex gap-2">
+                            <Button
+                                size="sm"
+                                variant="default"
+                                onClick={getInsights}
+                                disabled={generatingInsights || !rows.length}
+                                className="rounded-md bg-purple-600 hover:bg-purple-700 text-white"
+                            >
+                                {generatingInsights ? "Generating..." : "Get Insights ✨"}
+                            </Button>
+                            <Button size="sm" variant="secondary" onClick={() => setRows([])} className="rounded-md">Reset Data</Button>
+                        </div>
+                    </header>
+
+                    {/* KPI Ribbon */}
+                    <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        <KPI label="Total Units" val={summaries.totalUnits} />
+                        <KPI label="Stores" val={summaries.stores} />
+                        <KPI label="Products" val={summaries.products} />
+                        <KPI label="Avg/Store" val={summaries.avgStore} />
+                        <KPI label="Median/Store" val={summaries.midStore} />
+                        <KPI label="Avg/Product" val={summaries.avgProd} />
+                        <KPI label="Median/Product" val={summaries.midProd} />
+                        <KPI label="Prod-Loc w/o 0" val={summaries.prodLocCount} />
+                        <KPI label="Avg Gap" val={summaries.avgGap} />
+                    </section>
+
+                    {/* Filters */}
+                    <div className="flex flex-wrap items-center gap-4 sticky top-0 bg-white z-10 p-4 rounded-lg shadow-md">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">Top Stores</span>
+                            <SortSelect value={topLoc} on={handleTopLocChange} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">Top Products</span>
+                            <SortSelect value={topProd} on={handleTopProdChange} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">Units Distribution</span>
+                            <Select value={distView} onValueChange={handleDistViewChange}>
+                                <SelectTrigger className="w-32 h-8 text-xs rounded-md">
+                                    {distView === 'sku' ? 'SKU-Location' : 'Product-Location'}
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="sku">SKU-Location</SelectItem>
+                                    <SelectItem value="prod">Product-Location</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">Top Dist Points</span>
+                            <SortSelect value={topDist} on={handleTopDistChange} />
+                        </div>
+                    </div>
+
+                    {/* Location Chart */}
+                    <div ref={locRef}>
+                        <BarCard
+                            data={locSorted.map(d => ({ key: d.key, total: d.total }))}
+                            title="Units per Location"
+                            onClick={e =>
+                                e.activePayload &&
+                                openModal(
+                                    `Products in ${e.activePayload[0].payload.key}`,
+                                    sortArr(
+                                        groupSum(rows.filter(r => r.location_id === e.activePayload[0].payload.key), r => r.product_id),
+                                        "desc"
+                                    )
+                                )
+                            }
+                            controls={<SortSelect value={topLoc} on={handleTopLocChange} />}
+                            xLabel="Store ID"
+                            yLabel="Units"
+                            barName="Units" /* Explicitly set for clarity, though it's the default */
+                        />
+                    </div>
+
+                    {/* Product Chart */}
+                    <div ref={prodRef}>
+                        <BarCard
+                            data={prodSorted.map(d => ({ key: d.key, total: d.total }))}
+                            title="Units per Product"
+                            onClick={e =>
+                                e.activePayload &&
+                                openModal(
+                                    `Locations for ${e.activePayload[0].payload.key}`,
+                                    sortArr(
+                                        groupSum(rows.filter(r => r.product_id === e.activePayload[0].payload.key), r => r.location_id),
+                                        "desc"
+                                    )
+                                )
+                            }
+                            controls={<SortSelect value={topProd} on={handleTopProdChange} />}
+                            xLabel="Product ID"
+                            yLabel="Units"
+                            barName="Units" /* Explicitly set for clarity, though it's the default */
+                        />
+                    </div>
+
+                    {/* Distribution Chart */}
+                    <div ref={distRef}>
+                        <BarCard
+                            data={distSorted.map(d => ({ key: d.key, total: d.total }))}
+                            title={distView === "sku" ? "SKU-Location Distribution" : "Product-Location Distribution"}
+                            onClick={() => { }} // This chart does not have drill-down
+                            controls={
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-gray-700">Top Dist Points</span>
+                                    <SortSelect value={topDist} on={handleTopDistChange} />
+                                </div>
+                            }
+                            xLabel="Units"
+                            yLabel="# Pairs"
+                            barName="Pairs" /* Changed this to "Pairs" */
+                        />
+                    </div>
+
+                    {/* Zero-products and Gap */}
+                    <section className="grid gap-4 md:grid-cols-2">
+                        <Card className="shadow-md rounded-lg">
+                            <CardHeader className="flex flex-row justify-between items-center pb-2">
+                                <CardTitle className="text-sm">Products with 0 Units</CardTitle>
+                                <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => downloadCSV(zeroProd.map(p => ({ product: p })), "zero_units.csv")}
+                                    className="rounded-md"
+                                >
+                                    <Download className="w-4 h-4 text-gray-600" />
+                                </Button>
+                            </CardHeader>
+                            <CardContent className="max-h-60 overflow-y-auto text-xs">
+                                {zeroProd.length > 0 ? (
+                                    <ul className="list-disc list-inside space-y-1">
+                                        {zeroProd.map(p => (
+                                            <li key={p} className="text-gray-700">{p}</li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p className="text-gray-500">No products with zero units found.</p>
+                                )}
+                            </CardContent>
+                        </Card>
+
+                        <Card className="shadow-md rounded-lg">
+                            <CardHeader className="flex flex-row justify-between items-center pb-2">
+                                <CardTitle className="text-sm">Gap vs Units (Top 50)</CardTitle>
+                                <Button size="icon" variant="ghost" onClick={() => downloadCSV(gapData, "gap.csv")} className="rounded-md">
+                                    <Download className="w-4 h-4 text-gray-600" />
+                                </Button>
+                            </CardHeader>
+                            <CardContent className="max-h-60 overflow-y-auto text-xs">
+                                {gapData.length > 0 ? (
+                                    <table className="min-w-full text-xs border-collapse">
+                                        <thead className="sticky top-0 bg-gray-100 border-b border-gray-200">
+                                            <tr>
+                                                <th className="px-2 py-2 text-left font-semibold text-gray-700">Product</th>
+                                                <th className="px-2 py-2 text-right font-semibold text-gray-700">Units</th>
+                                                <th className="px-2 py-2 text-right font-semibold text-gray-700">Gap</th>
+                                                <th className="px-2 py-2 text-right font-semibold text-gray-700">Fill%</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {gapData.slice(0, 50).map(r => (
+                                                <tr key={r.product} className="border-b border-gray-100 odd:bg-white even:bg-gray-50">
+                                                    <td className="px-2 py-2 truncate max-w-[120px] text-gray-800">{r.product}</td>
+                                                    <td className="px-2 py-2 text-right text-gray-800">{r.units.toLocaleString()}</td>
+                                                    <td className="px-2 py-2 text-right text-gray-800">{r.gap.toLocaleString()}</td>
+                                                    <td className="px-2 py-2 text-right text-gray-800">{r.fill}%</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                ) : (
+                                    <p className="text-gray-500">No gap data available.</p>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </section>
+
+                    {/* Drill-down Dialog */}
+                    <Dialog open={!!modal} onOpenChange={() => setModal(null)}>
+                        <DialogContent className="max-w-3xl w-full p-4">
+                            <DialogHeader>
+                                <DialogTitle>{modal?.title}</DialogTitle>
+                            </DialogHeader>
+                            <div className="h-80 w-full">
+                                {modal?.data && modal.data.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={modal?.data || []}>
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis
+                                                dataKey="key"
+                                                angle={-45}
+                                                textAnchor="end"
+                                                interval={0}
+                                                height={70}
+                                                label={{
+                                                    value: modal?.title.includes("Products") ? "Product ID" : "Store ID",
+                                                    position: 'insideBottom',
+                                                    offset: -5,
+                                                    dy: 10
+                                                }}
+                                                tick={{ fontSize: 10 }}
+                                            />
+                                            <YAxis label={{ value: "Units", angle: -90, position: 'insideLeft', dx: -5 }} tick={{ fontSize: 10 }} />
+                                            <Tooltip />
+                                            <Legend />
+                                            <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="flex items-center justify-center h-full text-gray-500">
+                                        No drill-down data available.
+                                    </div>
+                                )}
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* LLM Insights Dialog */}
+                    <Dialog open={insightModalOpen} onOpenChange={setInsightModalOpen}>
+                        <DialogContent className="max-w-4xl w-full p-6">
+                            <DialogHeader>
+                                <DialogTitle>Allocation Insights ✨</DialogTitle>
+                            </DialogHeader>
+                            <div className="min-h-[150px] max-h-[400px] overflow-y-auto bg-gray-50 p-4 rounded-md text-gray-700 leading-relaxed">
+                                {generatingInsights ? (
+                                    <div className="flex flex-col items-center justify-center h-full">
+                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mb-2"></div>
+                                        <p>Generating insights...</p>
+                                    </div>
+                                ) : (
+                                    <pre className="whitespace-pre-wrap font-sans text-sm">{insights}</pre>
+                                )}
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+                </div>
+            );
+        }
+
+        // Main App component to render the AllocationDashboard
+        function App() {
+            return <AllocationDashboard />;
+        }
+
+        // Render the React application
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
